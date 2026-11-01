@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laboratorio de Acordes</title>
+    <style>
+        body {
+            background-color: #111; color: white; font-family: sans-serif;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0;
+        }
+        .contenedor {
+            text-align: center; background: #222; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+        #acorde-display {
+            font-size: 6rem; font-weight: bold; color: #FFCC00; margin: 20px 0; min-height: 120px;
+        }
+        #notas-activas { color: #0072CE; font-size: 1.2rem; min-height: 30px; }
+        button {
+            background: #0072CE; color: white; border: none; padding: 15px 30px; font-size: 1.2rem;
+            border-radius: 10px; cursor: pointer; font-weight: bold; margin-top: 20px;
+        }
+        button:hover { background: #005bb5; }
+    </style>
+</head>
+<body>
+
+    <div class="contenedor">
+        <h2>Detector de Acordes (FFT)</h2>
+        <div id="acorde-display">--</div>
+        <div id="notas-activas">Notas detectadas: ...</div>
+        <button id="btn-start" onclick="iniciarLaboratorio()">Activar Micrófono</button>
+    </div>
+
+    <script>
+        let audioContext;
+        let analyser;
+        const notasNombres = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        
+        // Diccionario básico de Acordes (Mayores y Menores)
+        const diccionarioAcordes = [
+            { nombre: "C", notas: ["C", "E", "G"] },
+            { nombre: "Cm", notas: ["C", "D#", "G"] },
+            { nombre: "D", notas: ["D", "F#", "A"] },
+            { nombre: "Dm", notas: ["D", "F", "A"] },
+            { nombre: "E", notas: ["E", "G#", "B"] },
+            { nombre: "Em", notas: ["E", "G", "B"] },
+            { nombre: "F", notas: ["F", "A", "C"] },
+            { nombre: "Fm", notas: ["F", "G#", "C"] },
+            { nombre: "G", notas: ["G", "B", "D"] },
+            { nombre: "Gm", notas: ["G", "A#", "D"] },
+            { nombre: "A", notas: ["A", "C#", "E"] },
+            { nombre: "Am", notas: ["A", "C", "E"] },
+            { nombre: "B", notas: ["B", "D#", "F#"] },
+            { nombre: "Bm", notas: ["B", "D", "F#"] }
+        ];
+
+        async function iniciarLaboratorio() {
+            document.getElementById('btn-start').style.display = 'none';
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            
+            // Resolución del motor FFT (alta para diferenciar notas graves)
+            analyser.fftSize = 8192; 
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+            
+            detectarAcorde();
+        }
+
+        function detectarAcorde() {
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Float32Array(bufferLength);
+            analyser.getFloatFrequencyData(dataArray);
+
+            let picos = [];
+            
+            // Buscamos frecuencias que suenen fuerte (por encima de -60 dB)
+            for (let i = 0; i < bufferLength; i++) {
+                if (dataArray[i] > -60) {
+                    // Verificamos si es un "pico" (suena más fuerte que las frecuencias de al lado)
+                    if (i > 0 && i < bufferLength - 1) {
+                        if (dataArray[i] > dataArray[i - 1] && dataArray[i] > dataArray[i + 1]) {
+                            const freq = i * audioContext.sampleRate / analyser.fftSize;
+                            // Ignoramos ruido muy grave o inaudible
+                            if (freq > 80 && freq < 1000) { 
+                                picos.push({ freq: freq, volumen: dataArray[i] });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Ordenamos los picos por volumen y cogemos los más fuertes
+            picos.sort((a, b) => b.volumen - a.volumen);
+            let notasDetectadas = new Set();
+
+            // Convertimos las 5 frecuencias más fuertes a notas musicales (sin importar la octava)
+            for (let i = 0; i < Math.min(5, picos.length); i++) {
+                const noteNum = 12 * (Math.log(picos[i].freq / 440) / Math.log(2)) + 69;
+                const index = Math.round(noteNum) % 12;
+                if (index >= 0) {
+                    notasDetectadas.add(notasNombres[index]);
+                }
+            }
+
+            const arrayNotas = Array.from(notasDetectadas);
+            document.getElementById('notas-activas').innerText = "Notas: " + (arrayNotas.length > 0 ? arrayNotas.join(", ") : "...");
+
+            // Buscamos si esas notas forman un acorde conocido
+            let acordeEncontrado = "--";
+            if (arrayNotas.length >= 3) {
+                for (let acorde of diccionarioAcordes) {
+                    // Comprobamos si las notas del acorde están dentro de las detectadas
+                    const coincide = acorde.notas.every(nota => arrayNotas.includes(nota));
+                    if (coincide) {
+                        acordeEncontrado = acorde.nombre;
+                        break;
+                    }
+                }
+            }
+
+            if (acordeEncontrado !== "--") {
+                document.getElementById('acorde-display').innerText = acordeEncontrado;
+            } else if (arrayNotas.length === 0) {
+                document.getElementById('acorde-display').innerText = "--";
+            }
+
+            requestAnimationFrame(detectarAcorde);
+        }
+    </script>
+</body>
+</html>
